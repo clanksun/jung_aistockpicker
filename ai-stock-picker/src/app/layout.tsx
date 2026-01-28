@@ -5,6 +5,7 @@ import "./globals.css"
 import { ThemeProvider } from "@/components/theme-provider"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
+import { Navigation } from "@/components/navigation"
 
 const inter = Inter({ subsets: ["latin"] })
 
@@ -78,6 +79,9 @@ export default function RootLayout({
                   </div>
                 </div>
               </header>
+
+              {/* 导航菜单 */}
+              <Navigation />
 
               {/* 页面内容 */}
               <main className="flex-1 overflow-x-hidden overflow-y-auto bg-gray-900/50 p-6">
