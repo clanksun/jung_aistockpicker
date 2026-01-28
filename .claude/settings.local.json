@@ -1,0 +1,26 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(npm install:*)",
+      "Bash(npm view:*)",
+      "Bash(npm run build:*)",
+      "Bash(npm run dev:*)",
+      "Bash(lsof:*)",
+      "Bash(xargs kill:*)",
+      "Bash(pkill:*)",
+      "Bash(kill:*)",
+      "Bash(chmod:*)",
+      "Bash(cat:*)",
+      "Bash(grep:*)",
+      "Bash(find:*)",
+      "Bash(curl:*)",
+      "Bash(source:*)",
+      "Bash(pip install:*)",
+      "Bash(python3:*)",
+      "Bash(timeout 5 python:*)",
+      "Bash(python -m py_compile:*)",
+      "Bash(du:*)",
+      "Bash(wc:*)"
+    ]
+  }
+}
