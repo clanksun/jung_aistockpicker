@@ -1,7 +1,7 @@
 "use client"
 
 import * as React from "react"
-import { ResponsiveContainer, XAxis, YAxis, Tooltip, CartesianGrid, Area, Line } from "recharts"
+import { ResponsiveContainer, XAxis, YAxis, Tooltip, CartesianGrid, Area, Line, ComposedChart } from "recharts"
 import { cn } from "@/lib/utils"
 
 interface CandlestickData {
@@ -90,14 +90,21 @@ export function CandlestickChart({
   return (
     <div className={cn("w-full", className)} {...props}>
       <ResponsiveContainer width="100%" height={height}>
-        {/* 主图表区域 */}
-        <div className="relative">
+        <ComposedChart data={visibleData}>
+          {/* 渐变定义 */}
+          <defs>
+            <linearGradient id="priceGradient" x1="0" y1="0" x2="0" y2="1">
+              <stop offset="5%" stopColor="#10b981" stopOpacity={0.15}/>
+              <stop offset="50%" stopColor="#10b981" stopOpacity={0.08}/>
+              <stop offset="95%" stopColor="#ef4444" stopOpacity={0.15}/>
+              <stop offset="50%" stopColor="#ef4444" stopOpacity={0.08}/>
+            </linearGradient>
+          </defs>
+
           {/* 价格走势线 */}
           <Area
-            data={visibleData}
-            layout="horizontal"
             dataKey="close"
-            stroke={null}
+            stroke="none"
             fill="url(#priceGradient)"
             isAnimationActive={true}
             animationDuration={500}
@@ -159,51 +166,41 @@ export function CandlestickChart({
               animationDuration={500}
             />
           )}
-        </div>
 
-        {/* 渐变定义 */}
-        <defs>
-          <linearGradient id="priceGradient" x1="0" y1="0" x2="0" y2="1">
-            <stop offset="5%" stopColor="#10b981" stopOpacity={0.15}/>
-            <stop offset="50%" stopColor="#10b981" stopOpacity={0.08}/>
-            <stop offset="95%" stopColor="#ef4444" stopOpacity={0.15}/>
-            <stop offset="50%" stopColor="#ef4444" stopOpacity={0.08}/>
-          </linearGradient>
-        </defs>
+          {/* 坐标轴 */}
+          <XAxis
+            dataKey="date"
+            stroke="#4B5563"
+            strokeWidth={1}
+            tick={{ fontSize: 11, fill: '#9CA3AF' }}
+            tickMargin={10}
+            axisLine={true}
+            tickLine={false}
+            padding={{ left: 0, right: 10 }}
+          />
+          <YAxis
+            stroke="#4B5563"
+            strokeWidth={1}
+            tick={{ fontSize: 11, fill: '#9CA3AF' }}
+            tickMargin={10}
+            axisLine={true}
+            tickLine={false}
+            padding={{ top: 10, bottom: 0 }}
+            domain={['auto', 'auto']}
+            tickFormatter={(value) => `$${value.toFixed(2)}`}
+          />
 
-        {/* 坐标轴 */}
-        <XAxis
-          dataKey="date"
-          stroke="#4B5563"
-          strokeWidth={1}
-          tick={{ fontSize: 11, fill: '#9CA3AF' }}
-          tickMargin={10}
-          axisLine={true}
-          tickLine={false}
-          padding={{ left: 0, right: 10 }}
-        />
-        <YAxis
-          stroke="#4B5563"
-          strokeWidth={1}
-          tick={{ fontSize: 11, fill: '#9CA3AF' }}
-          tickMargin={10}
-          axisLine={true}
-          tickLine={false}
-          padding={{ top: 10, bottom: 0 }}
-          domain={['auto', 'auto']}
-          tickFormatter={(value) => `$${value.toFixed(2)}`}
-        />
+          {/* 网格线 */}
+          <CartesianGrid
+            strokeDasharray="3 3"
+            vertical={false}
+            stroke="#374151"
+            strokeOpacity={0.1}
+          />
 
-        {/* 网格线 */}
-        <CartesianGrid
-          strokeDasharray="3 3"
-          vertical={false}
-          stroke="#374151"
-          strokeOpacity={0.1}
-        />
-
-        {/* Tooltip */}
-        <Tooltip content={<CustomTooltip />} />
+          {/* Tooltip */}
+          <Tooltip content={<CustomTooltip />} />
+        </ComposedChart>
       </ResponsiveContainer>
     </div>
   )

@@ -119,6 +119,17 @@ export interface AnalysisData {
   reasoning: string[]
 }
 
+// 分析历史记录
+export interface AnalysisHistory {
+  id: string
+  timestamp: string
+  symbol: string
+  stockName: string
+  currentPrice: number
+  analysis: AnalysisData
+  aiProvider?: string
+}
+
 // 热门股票
 export interface PopularStock {
   symbol: string

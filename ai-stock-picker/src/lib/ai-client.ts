@@ -6,8 +6,11 @@
 import type { AIProvider, AIMessage, AIRequest, AIResponse, StockAnalysisRequest } from '@/types/ai'
 import { AI_PROVIDERS } from './ai-providers'
 
+// 默认超时时间（毫秒）
+const DEFAULT_TIMEOUT = 60000 // 60秒
+
 /**
- * 调用 AI API
+ * 带重试机制的 AI API 调用
  */
 export async function callAI(
   provider: AIProvider,
@@ -17,9 +20,13 @@ export async function callAI(
   options?: {
     temperature?: number
     maxTokens?: number
+    timeout?: number
+    maxRetries?: number
   }
 ): Promise<AIResponse> {
   const providerConfig = AI_PROVIDERS[provider]
+  const maxRetries = options?.maxRetries || 2
+  const timeout = options?.timeout || DEFAULT_TIMEOUT
 
   if (!providerConfig) {
     return {
@@ -35,19 +42,38 @@ export async function callAI(
     }
   }
 
-  try {
-    // 根据不同提供商构建请求
-    if (provider === 'anthropic') {
-      return await callAnthropic(apiKey, model, messages, options)
-    } else {
-      return await callOpenAICompatible(providerConfig.baseUrl, apiKey, model, messages, options)
+  // 重试逻辑
+  for (let attempt = 0; attempt < maxRetries; attempt++) {
+    try {
+      // 根据不同提供商构建请求
+      if (provider === 'anthropic') {
+        return await callAnthropic(apiKey, model, messages, { ...options, timeout })
+      } else {
+        return await callOpenAICompatible(providerConfig.baseUrl, apiKey, model, messages, { ...options, timeout })
+      }
+    } catch (error) {
+      const errorMsg = error instanceof Error ? error.message : 'Unknown error'
+
+      // 最后一次尝试失败，直接抛出错误
+      if (attempt === maxRetries - 1) {
+        console.error(`AI API Error (attempt ${attempt + 1}/${maxRetries}):`, errorMsg)
+        return {
+          success: false,
+          error: errorMsg
+        }
+      }
+
+      // 等待后重试（指数退避）
+      const waitTime = Math.min(1000 * Math.pow(2, attempt), 10000)
+      console.log(`Retrying in ${waitTime}ms...`)
+      await new Promise(resolve => setTimeout(resolve, waitTime))
     }
-  } catch (error) {
-    console.error('AI API Error:', error)
-    return {
-      success: false,
-      error: error instanceof Error ? error.message : 'Unknown error'
-    }
+  }
+
+  // 不应该到达这里
+  return {
+    success: false,
+    error: 'Max retries exceeded'
   }
 }
 
@@ -59,37 +85,49 @@ async function callOpenAICompatible(
   apiKey: string,
   model: string,
   messages: AIMessage[],
-  options?: { temperature?: number; maxTokens?: number }
+  options?: { temperature?: number; maxTokens?: number; timeout?: number }
 ): Promise<AIResponse> {
-  const response = await fetch(baseUrl, {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-      'Authorization': `Bearer ${apiKey}`
-    },
-    body: JSON.stringify({
-      model,
-      messages,
-      temperature: options?.temperature || 0.7,
-      max_tokens: options?.maxTokens || 2000
+  const timeout = options?.timeout || DEFAULT_TIMEOUT
+  const controller = new AbortController()
+  const timeoutId = setTimeout(() => controller.abort(), timeout)
+
+  try {
+    const response = await fetch(baseUrl, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': `Bearer ${apiKey}`
+      },
+      body: JSON.stringify({
+        model,
+        messages,
+        temperature: options?.temperature || 0.7,
+        max_tokens: options?.maxTokens || 2000
+      }),
+      signal: controller.signal
     })
-  })
 
-  if (!response.ok) {
-    const error = await response.text()
-    throw new Error(`API Error: ${response.status} - ${error}`)
-  }
+    clearTimeout(timeoutId)
 
-  const data = await response.json()
-
-  return {
-    success: true,
-    content: data.choices[0]?.message?.content || '',
-    usage: {
-      promptTokens: data.usage?.prompt_tokens || 0,
-      completionTokens: data.usage?.completion_tokens || 0,
-      totalTokens: data.usage?.total_tokens || 0
+    if (!response.ok) {
+      const error = await response.text()
+      throw new Error(`API Error: ${response.status} - ${error}`)
     }
+
+    const data = await response.json()
+
+    return {
+      success: true,
+      content: data.choices[0]?.message?.content || '',
+      usage: {
+        promptTokens: data.usage?.prompt_tokens || 0,
+        completionTokens: data.usage?.completion_tokens || 0,
+        totalTokens: data.usage?.total_tokens || 0
+      }
+    }
+  } catch (error) {
+    clearTimeout(timeoutId)
+    throw error
   }
 }
 
@@ -100,41 +138,53 @@ async function callAnthropic(
   apiKey: string,
   model: string,
   messages: AIMessage[],
-  options?: { temperature?: number; maxTokens?: number }
+  options?: { temperature?: number; maxTokens?: number; timeout?: number }
 ): Promise<AIResponse> {
-  const response = await fetch('https://api.anthropic.com/v1/messages', {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-      'x-api-key': apiKey,
-      'anthropic-version': '2023-06-01'
-    },
-    body: JSON.stringify({
-      model,
-      messages: messages.map(m => ({
-        role: m.role,
-        content: m.content
-      })),
-      max_tokens: options?.maxTokens || 2000,
-      temperature: options?.temperature || 0.7
+  const timeout = options?.timeout || DEFAULT_TIMEOUT
+  const controller = new AbortController()
+  const timeoutId = setTimeout(() => controller.abort(), timeout)
+
+  try {
+    const response = await fetch('https://api.anthropic.com/v1/messages', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'x-api-key': apiKey,
+        'anthropic-version': '2023-06-01'
+      },
+      body: JSON.stringify({
+        model,
+        messages: messages.map(m => ({
+          role: m.role,
+          content: m.content
+        })),
+        max_tokens: options?.maxTokens || 2000,
+        temperature: options?.temperature || 0.7
+      }),
+      signal: controller.signal
     })
-  })
 
-  if (!response.ok) {
-    const error = await response.text()
-    throw new Error(`API Error: ${response.status} - ${error}`)
-  }
+    clearTimeout(timeoutId)
 
-  const data = await response.json()
-
-  return {
-    success: true,
-    content: data.content[0]?.text || '',
-    usage: {
-      promptTokens: data.usage?.input_tokens || 0,
-      completionTokens: data.usage?.output_tokens || 0,
-      totalTokens: (data.usage?.input_tokens || 0) + (data.usage?.output_tokens || 0)
+    if (!response.ok) {
+      const error = await response.text()
+      throw new Error(`API Error: ${response.status} - ${error}`)
     }
+
+    const data = await response.json()
+
+    return {
+      success: true,
+      content: data.content[0]?.text || '',
+      usage: {
+        promptTokens: data.usage?.input_tokens || 0,
+        completionTokens: data.usage?.output_tokens || 0,
+        totalTokens: (data.usage?.input_tokens || 0) + (data.usage?.output_tokens || 0)
+      }
+    }
+  } catch (error) {
+    clearTimeout(timeoutId)
+    throw error
   }
 }
 

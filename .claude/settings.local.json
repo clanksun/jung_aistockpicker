@@ -22,7 +22,8 @@
       "Bash(du:*)",
       "Bash(wc:*)",
       "Bash(ls:*)",
-      "Bash(git -C /Users/zhengsun/PycharmProjects/Backtrader/ai-stock-picker status:*)"
+      "Bash(git -C /Users/zhengsun/PycharmProjects/Backtrader/ai-stock-picker status:*)",
+      "Bash(python:*)"
     ]
   }
 }

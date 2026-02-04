@@ -16,6 +16,10 @@ interface StockData {
   currentPrice: number
   change: number
   changePercent: number
+  '52WeekHigh'?: number
+  '52WeekLow'?: number
+  peRatio?: number
+  pbRatio?: number
 }
 
 interface StockHistory {
@@ -25,7 +29,11 @@ interface StockHistory {
   low: number
   close: number
   volume: number
+  ma5?: number
+  ma10?: number
   ma20?: number
+  rsi?: number
+  macd?: number
 }
 
 export function StockDetail({ symbol, onBack }: StockDetailProps) {
@@ -158,7 +166,7 @@ export function StockDetail({ symbol, onBack }: StockDetailProps) {
               </CardTitle>
               {stockData && (
                 <p className="text-gray-400">
-                  {stockData.name || symbol}
+                  {symbol}
                 </p>
               )}
             </div>
@@ -301,18 +309,18 @@ export function StockDetail({ symbol, onBack }: StockDetailProps) {
               <h4 className="text-white font-semibold mb-3">RSI 指标</h4>
               <div className="text-center">
                 <p className="text-4xl font-bold text-blue-400">
-                  {stockHistory.length > 0 && stockHistory[stockHistory.length - 1].rsi
-                    ? Math.round(stockHistory[stockHistory.length - 1].rsi)
+                  {stockHistory.length > 0 && stockHistory[stockHistory.length - 1].rsi != null
+                    ? Math.round(stockHistory[stockHistory.length - 1].rsi!)
                     : '--'
                 }
                 </p>
                 <p className="text-sm text-gray-400 mt-2">
-                  {stockHistory.length > 0 && stockHistory[stockHistory.length - 1].rsi
-                    ? stockHistory[stockHistory.length - 1].rsi > 70
+                  {stockHistory.length > 0 && stockHistory[stockHistory.length - 1].rsi != null
+                    ? (stockHistory[stockHistory.length - 1].rsi! > 70
                       ? '超买区域'
-                      : stockHistory[stockHistory.length - 1].rsi < 30
+                      : stockHistory[stockHistory.length - 1].rsi! < 30
                       ? '超卖区域'
-                      : '正常区域'
+                      : '正常区域')
                     : '--'
                   }
                 </p>
@@ -325,8 +333,8 @@ export function StockDetail({ symbol, onBack }: StockDetailProps) {
                       : 'bg-gray-600'
                   }`}
                   style={{
-                    width: stockHistory.length > 0
-                      ? `${Math.min(100, Math.max(0, stockHistory[stockHistory.length - 1].rsi))}%`
+                    width: stockHistory.length > 0 && stockHistory[stockHistory.length - 1].rsi != null
+                      ? `${Math.min(100, Math.max(0, stockHistory[stockHistory.length - 1].rsi!))}%`
                       : '0%'
                   }}
                 />
@@ -339,8 +347,8 @@ export function StockDetail({ symbol, onBack }: StockDetailProps) {
                 <div className="flex items-center justify-between">
                   <span className="text-gray-400 text-sm">MA5</span>
                   <span className="text-white font-medium">
-                    {stockHistory.length > 0 && stockHistory[stockHistory.length - 1].ma5
-                      ? stockHistory[stockHistory.length - 1].ma5.toFixed(2)
+                    {stockHistory.length > 0 && stockHistory[stockHistory.length - 1].ma5 != null
+                      ? stockHistory[stockHistory.length - 1].ma5!.toFixed(2)
                       : '--'
                     }
                   </span>
@@ -348,8 +356,8 @@ export function StockDetail({ symbol, onBack }: StockDetailProps) {
                 <div className="flex items-center justify-between">
                   <span className="text-gray-400 text-sm">MA10</span>
                   <span className="text-white font-medium">
-                    {stockHistory.length > 0 && stockHistory[stockHistory.length - 1].ma10
-                      ? stockHistory[stockHistory.length - 1].ma10.toFixed(2)
+                    {stockHistory.length > 0 && stockHistory[stockHistory.length - 1].ma10 != null
+                      ? stockHistory[stockHistory.length - 1].ma10!.toFixed(2)
                       : '--'
                     }
                   </span>
@@ -357,8 +365,8 @@ export function StockDetail({ symbol, onBack }: StockDetailProps) {
                 <div className="flex items-center justify-between">
                   <span className="text-gray-400 text-sm">MA20</span>
                   <span className="text-amber-400 font-medium">
-                    {stockHistory.length > 0 && stockHistory[stockHistory.length - 1].ma20
-                      ? stockHistory[stockHistory.length - 1].ma20.toFixed(2)
+                    {stockHistory.length > 0 && stockHistory[stockHistory.length - 1].ma20 != null
+                      ? stockHistory[stockHistory.length - 1].ma20!.toFixed(2)
                       : '--'
                     }
                   </span>

@@ -2,12 +2,13 @@
 
 import { useState, useEffect } from "react"
 import { useRouter } from "next/navigation"
-import { Brain, TrendingUp, TrendingDown, AlertCircle, CheckCircle, Zap, Settings, Info } from "lucide-react"
+import { Brain, TrendingUp, TrendingDown, AlertCircle, CheckCircle, Zap, Settings, Info, Activity, History, Trash2, Clock, MessageCircle, X, Send } from "lucide-react"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Button } from "@/components/ui/button"
-import { callAI, getStockAnalysisPrompt } from "@/lib/ai-client"
+import { ConfirmDialog } from "@/components/ui/confirm-dialog"
+import { callAI, getStockAnalysisPrompt, getStockQuestionPrompt } from "@/lib/ai-client"
 import type { UserAIConfig } from "@/types/ai"
-import type { AnalysisData } from "@/types/stock"
+import type { AnalysisData, StockInfo, AnalysisHistory } from "@/types/stock"
 
 export default function AnalysisPage() {
   const router = useRouter()
@@ -15,14 +16,162 @@ export default function AnalysisPage() {
   const [stockName, setStockName] = useState('Apple Inc.')
   const [currentPrice, setCurrentPrice] = useState(185.92)
   const [isLoading, setIsLoading] = useState(false)
+  const [isLoadingStock, setIsLoadingStock] = useState(false)
   const [analysis, setAnalysis] = useState<AnalysisData | null>(null)
   const [aiConfigs, setAiConfigs] = useState<UserAIConfig[]>([])
   const [useMock, setUseMock] = useState(false)
   const [errorMessage, setErrorMessage] = useState('')
+  const [showHistory, setShowHistory] = useState(false)
+  const [history, setHistory] = useState<AnalysisHistory[]>([])
+  const [confirmDialog, setConfirmDialog] = useState<{
+    show: boolean
+    title: string
+    message: string
+    onConfirm: () => void
+  }>({
+    show: false,
+    title: '',
+    message: '',
+    onConfirm: () => {}
+  })
+  const [toast, setToast] = useState<{
+    show: boolean
+    message: string
+    type: 'success' | 'error' | 'info'
+  }>({
+    show: false,
+    message: '',
+    type: 'info'
+  })
+
+  // AI 问答相关状态
+  const [showChat, setShowChat] = useState(false)
+  const [chatMessages, setChatMessages] = useState<Array<{
+    role: 'user' | 'assistant'
+    content: string
+    timestamp: string
+  }>>([])
+  const [currentQuestion, setCurrentQuestion] = useState('')
+  const [isChatLoading, setIsChatLoading] = useState(false)
 
   useEffect(() => {
     loadAIConfigs()
+    loadHistory()
+    loadChatHistory()
   }, [])
+
+  const loadChatHistory = () => {
+    const stored = localStorage.getItem('chat_history')
+    if (stored) {
+      try {
+        const history = JSON.parse(stored)
+        setChatMessages(history)
+      } catch (error) {
+        console.error('Failed to load chat history:', error)
+      }
+    }
+  }
+
+  const saveChatHistory = (messages: typeof chatMessages) => {
+    localStorage.setItem('chat_history', JSON.stringify(messages))
+  }
+
+  const clearChatHistory = () => {
+    setChatMessages([])
+    localStorage.removeItem('chat_history')
+  }
+
+  const sendQuestion = async () => {
+    if (!currentQuestion.trim()) {
+      showToast('请输入问题', 'error')
+      return
+    }
+
+    const userMessage = {
+      role: 'user' as const,
+      content: currentQuestion,
+      timestamp: new Date().toISOString()
+    }
+
+    // 添加用户消息
+    const updatedMessages = [...chatMessages, userMessage]
+    setChatMessages(updatedMessages)
+    saveChatHistory(updatedMessages)
+    setCurrentQuestion('')
+    setIsChatLoading(true)
+
+    try {
+      let response
+
+      if (useMock) {
+        // 模拟回答
+        await new Promise(resolve => setTimeout(resolve, 1500))
+        response = {
+          success: true,
+          content: `关于 ${symbol} (${stockName}) 的回答：\n\n这是一个模拟的回答。在实际使用中，当您配置了AI API后，这里会显示AI的真实回答。\n\n您的问题：${currentQuestion}\n\n建议：请先在设置页面配置AI提供商，或勾选"使用模拟数据"选项。`
+        }
+      } else {
+        // 使用真实AI API
+        const enabledConfigs = aiConfigs.filter(c => c.enabled && c.apiKey)
+
+        if (enabledConfigs.length === 0) {
+          throw new Error('没有可用的 AI 配置')
+        }
+
+        const config = enabledConfigs[0]
+
+        // 使用当前分析结果作为上下文
+        const context = analysis ? JSON.stringify(analysis, null, 2) : undefined
+
+        const messages = getStockQuestionPrompt(symbol, currentQuestion, context)
+
+        response = await callAI(
+          config.provider,
+          config.apiKey,
+          config.model,
+          messages,
+          { timeout: 60000, maxRetries: 2 }
+        )
+      }
+
+      if (response.success && response.content) {
+        const assistantMessage = {
+          role: 'assistant' as const,
+          content: response.content,
+          timestamp: new Date().toISOString()
+        }
+
+        const finalMessages = [...updatedMessages, assistantMessage]
+        setChatMessages(finalMessages)
+        saveChatHistory(finalMessages)
+      } else {
+        throw new Error(response.error || '获取回答失败')
+      }
+    } catch (error) {
+      const errorMsg = error instanceof Error ? error.message : '获取回答失败'
+      showToast(errorMsg, 'error')
+
+      // 添加错误消息
+      const errorMessage = {
+        role: 'assistant' as const,
+        content: `抱歉，获取回答时出错：${errorMsg}`,
+        timestamp: new Date().toISOString()
+      }
+
+      const finalMessages = [...updatedMessages, errorMessage]
+      setChatMessages(finalMessages)
+      saveChatHistory(finalMessages)
+    } finally {
+      setIsChatLoading(false)
+    }
+  }
+
+  const handleKeyPress = (e: React.KeyboardEvent) => {
+    if (e.key === 'Enter' && !e.shiftKey) {
+      e.preventDefault()
+      sendQuestion()
+    }
+  }
 
   const loadAIConfigs = () => {
     const stored = localStorage.getItem('ai_configs')
@@ -39,27 +188,112 @@ export default function AnalysisPage() {
     }
   }
 
+  const loadHistory = () => {
+    const stored = localStorage.getItem('analysis_history')
+    if (stored) {
+      const historyData = JSON.parse(stored)
+      setHistory(historyData)
+    }
+  }
+
+  const saveToHistory = (analysisData: AnalysisData, provider?: string) => {
+    const newRecord: AnalysisHistory = {
+      id: Date.now().toString(),
+      timestamp: new Date().toISOString(),
+      symbol: symbol,
+      stockName: stockName,
+      currentPrice: currentPrice,
+      analysis: analysisData,
+      aiProvider: provider
+    }
+
+    // 保持最近 50 条记录
+    const updatedHistory = [newRecord, ...history].slice(0, 50)
+    setHistory(updatedHistory)
+    localStorage.setItem('analysis_history', JSON.stringify(updatedHistory))
+  }
+
+  const deleteHistoryItem = (id: string) => {
+    const updatedHistory = history.filter(item => item.id !== id)
+    setHistory(updatedHistory)
+    localStorage.setItem('analysis_history', JSON.stringify(updatedHistory))
+  }
+
+  const clearHistory = () => {
+    setHistory([])
+    localStorage.removeItem('analysis_history')
+  }
+
+  const fetchStockInfo = async (symbol: string) => {
+    if (!symbol || symbol.length < 1) return
+
+    setIsLoadingStock(true)
+    try {
+      const response = await fetch(`/api/stock/${symbol}/info`)
+      const data = await response.json()
+
+      if (data.success && data.data) {
+        setStockName(data.data.name || symbol)
+        setCurrentPrice(data.data.currentPrice || 0)
+      } else {
+        // 无法获取股票信息，但不阻止用户继续
+        console.warn('Could not fetch stock info, using default values')
+      }
+    } catch (error) {
+      console.error('Failed to fetch stock info:', error)
+      // 静默失败，保持用户可以继续操作
+    } finally {
+      setIsLoadingStock(false)
+    }
+  }
+
+  // 当符号改变时获取股票信息
+  useEffect(() => {
+    const delayDebounce = setTimeout(() => {
+      if (symbol.length >= 1) {
+        fetchStockInfo(symbol)
+      }
+    }, 500) // 防抖 500ms
+
+    return () => clearTimeout(delayDebounce)
+  }, [symbol])
+
+  const showToast = (message: string, type: 'success' | 'error' | 'info') => {
+    setToast({ show: true, message, type })
+    setTimeout(() => setToast({ ...toast, show: false }), 3000)
+  }
+
   const runAnalysis = async () => {
+    // 验证输入
+    if (!symbol || symbol.trim().length === 0) {
+      showToast('请输入股票代码', 'error')
+      return
+    }
+
     setIsLoading(true)
     setErrorMessage('')
 
     try {
       let result: AnalysisData
+      let provider: string | undefined
 
       if (useMock) {
         // 使用模拟数据
         await new Promise(resolve => setTimeout(resolve, 2000))
         result = generateMockAnalysis()
+        provider = 'Mock Data'
+        showToast('分析完成（模拟数据）', 'success')
       } else {
         // 使用真实 AI API
         const enabledConfigs = aiConfigs.filter(c => c.enabled && c.apiKey)
 
         if (enabledConfigs.length === 0) {
-          throw new Error('没有可用的 AI 配置，请先在设置页面配置 AI')
+          throw new Error('没有可用的 AI 配置，请先在设置页面配置 AI 或勾选"使用模拟数据"')
         }
 
         // 尝试使用第一个可用的配置
         const config = enabledConfigs[0]
+        provider = config.provider
 
         const prompt = getStockAnalysisPrompt({
           symbol,
@@ -83,7 +317,8 @@ export default function AnalysisPage() {
               role: 'user',
               content: prompt + '\n\n请严格按照上面的JSON格式返回，不要包含其他文字。'
             }
-          ]
+          ],
+          { timeout: 60000, maxRetries: 2 }
         )
 
         if (!response.success || !response.content) {
@@ -112,18 +347,28 @@ export default function AnalysisPage() {
       }
 
       setAnalysis(result)
+      // 保存到历史记录
+      saveToHistory(result, provider)
     } catch (error) {
       const errorMsg = error instanceof Error ? error.message : '分析失败'
       setErrorMessage(errorMsg)
+      showToast(errorMsg, 'error')
 
       // 如果是 AI 调用失败，询问是否降级到模拟数据
-      if (!useMock && errorMsg.includes('API')) {
-        if (confirm('AI 调用失败：' + errorMsg + '\n\n是否使用模拟数据继续？')) {
-          setUseMock(true)
-          const mockResult = generateMockAnalysis()
-          setAnalysis(mockResult)
-          setErrorMessage('')
-        }
+      if (!useMock && (errorMsg.includes('API') || errorMsg.includes('超时') || errorMsg.includes('network'))) {
+        setConfirmDialog({
+          show: true,
+          title: 'AI 调用失败',
+          message: `${errorMsg}\n\n是否使用模拟数据继续？`,
+          onConfirm: () => {
+            setUseMock(true)
+            const mockResult = generateMockAnalysis()
+            setAnalysis(mockResult)
+            saveToHistory(mockResult, 'Mock Data')
+            setErrorMessage('')
+            showToast('已切换到模拟数据', 'info')
+          }
+        })
       }
     } finally {
       setIsLoading(false)
@@ -209,6 +454,24 @@ export default function AnalysisPage() {
           </h1>
           <p className="text-gray-400">基于多维度数据的智能投资建议</p>
         </div>
+        <div className="flex items-center space-x-3">
+          <Button
+            variant="outline"
+            onClick={() => setShowChat(!showChat)}
+            className="border-purple-600/50 text-purple-300 hover:bg-purple-600/10"
+          >
+            <MessageCircle className="h-4 w-4 mr-2" />
+            AI 问答 {chatMessages.length > 0 && `(${chatMessages.length})`}
+          </Button>
+          <Button
+            variant="outline"
+            onClick={() => setShowHistory(!showHistory)}
+            className="border-gray-600/50 text-gray-300 hover:bg-gray-700/50"
+          >
+            <History className="h-4 w-4 mr-2" />
+            历史记录 {history.length > 0 && `(${history.length})`}
+          </Button>
+        </div>
       </div>
 
       {/* AI 配置提示 */}
@@ -251,6 +514,227 @@ export default function AnalysisPage() {
         </CardContent>
       </Card>
 
+      {/* AI 问答对话框 */}
+      {showChat && (
+        <div className="fixed inset-0 z-40 flex items-center justify-center">
+          {/* 背景遮罩 */}
+          <div
+            className="absolute inset-0 bg-black/60 backdrop-blur-sm"
+            onClick={() => setShowChat(false)}
+          />
+
+          {/* 对话框内容 */}
+          <div className="relative z-10 w-full max-w-3xl mx-4 bg-gray-800 border border-gray-700 rounded-2xl shadow-2xl flex flex-col max-h-[80vh]">
+            {/* 标题栏 */}
+            <div className="flex items-center justify-between p-4 border-b border-gray-700">
+              <div className="flex items-center space-x-3">
+                <MessageCircle className="h-5 w-5 text-purple-400" />
+                <h3 className="text-lg font-semibold text-white">AI 智能问答</h3>
+                <span className="text-sm text-gray-400">关于 {symbol}</span>
+              </div>
+              <div className="flex items-center space-x-2">
+                {chatMessages.length > 0 && (
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    onClick={clearChatHistory}
+                    className="text-red-400 hover:text-red-300 hover:bg-red-600/10"
+                  >
+                    <Trash2 className="h-4 w-4 mr-1" />
+                    清空
+                  </Button>
+                )}
+                <Button
+                  variant="ghost"
+                  size="icon"
+                  onClick={() => setShowChat(false)}
+                  className="text-gray-400 hover:text-white hover:bg-gray-700"
+                >
+                  <X className="h-5 w-5" />
+                </Button>
+              </div>
+            </div>
+
+            {/* 聊天内容区域 */}
+            <div className="flex-1 overflow-y-auto p-4 space-y-4 min-h-[400px] max-h-[500px]">
+              {chatMessages.length === 0 ? (
+                <div className="flex flex-col items-center justify-center h-full text-gray-400">
+                  <MessageCircle className="h-16 w-16 mb-4 text-gray-600" />
+                  <p className="text-lg mb-2">开始向 AI 提问</p>
+                  <p className="text-sm">询问关于 {symbol} ({stockName}) 的任何问题</p>
+                  <div className="mt-4 text-sm text-gray-500 space-y-1">
+                    <p>• 技术指标解读</p>
+                    <p>• 投资建议</p>
+                    <p>• 风险分析</p>
+                    <p>• 行业对比</p>
+                  </div>
+                </div>
+              ) : (
+                chatMessages.map((msg, index) => (
+                  <div
+                    key={index}
+                    className={`flex ${msg.role === 'user' ? 'justify-end' : 'justify-start'}`}
+                  >
+                    <div
+                      className={`max-w-[80%] rounded-2xl px-4 py-3 ${
+                        msg.role === 'user'
+                          ? 'bg-blue-600 text-white'
+                          : 'bg-gray-700 text-gray-100'
+                      }`}
+                    >
+                      <div className="whitespace-pre-wrap break-words text-sm leading-relaxed">
+                        {msg.content}
+                      </div>
+                      <div className={`text-xs mt-2 ${
+                        msg.role === 'user' ? 'text-blue-200' : 'text-gray-400'
+                      }`}>
+                        {new Date(msg.timestamp).toLocaleTimeString('zh-CN', {
+                          hour: '2-digit',
+                          minute: '2-digit'
+                        })}
+                      </div>
+                    </div>
+                  </div>
+                ))
+              )}
+              {isChatLoading && (
+                <div className="flex justify-start">
+                  <div className="bg-gray-700 rounded-2xl px-4 py-3">
+                    <div className="flex items-center space-x-2">
+                      <div className="flex space-x-1">
+                        <div className="w-2 h-2 bg-purple-400 rounded-full animate-bounce" style={{ animationDelay: '0ms' }}></div>
+                        <div className="w-2 h-2 bg-purple-400 rounded-full animate-bounce" style={{ animationDelay: '150ms' }}></div>
+                        <div className="w-2 h-2 bg-purple-400 rounded-full animate-bounce" style={{ animationDelay: '300ms' }}></div>
+                      </div>
+                      <span className="text-sm text-gray-400">AI 正在思考...</span>
+                    </div>
+                  </div>
+                </div>
+              )}
+            </div>
+
+            {/* 输入区域 */}
+            <div className="p-4 border-t border-gray-700">
+              <div className="flex items-center space-x-3">
+                <input
+                  type="text"
+                  value={currentQuestion}
+                  onChange={(e) => setCurrentQuestion(e.target.value)}
+                  onKeyPress={handleKeyPress}
+                  placeholder={`询问关于 ${symbol} 的问题...`}
+                  className="flex-1 px-4 py-3 bg-gray-700/50 border border-gray-600/50 rounded-xl text-white placeholder-gray-400 focus:outline-none focus:border-purple-500 focus:ring-1 focus:ring-purple-500"
+                  disabled={isChatLoading}
+                />
+                <Button
+                  onClick={sendQuestion}
+                  disabled={isChatLoading || !currentQuestion.trim()}
+                  className="bg-gradient-to-r from-purple-600 to-blue-600 hover:from-purple-700 hover:to-blue-700 text-white px-6"
+                >
+                  {isChatLoading ? (
+                    <div className="animate-spin rounded-full h-5 w-5 border-b-2 border-white"></div>
+                  ) : (
+                    <>
+                      <Send className="h-4 w-4 mr-2" />
+                      发送
+                    </>
+                  )}
+                </Button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* 历史记录 */}
+      {showHistory && (
+        <Card className="bg-gray-800/50 border-gray-700/50">
+          <CardHeader>
+            <div className="flex items-center justify-between">
+              <CardTitle className="text-white flex items-center">
+                <Clock className="h-5 w-5 mr-2 text-blue-400" />
+                分析历史
+              </CardTitle>
+              {history.length > 0 && (
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  onClick={clearHistory}
+                  className="text-red-400 hover:text-red-300 hover:bg-red-600/10"
+                >
+                  <Trash2 className="h-4 w-4 mr-2" />
+                  清空历史
+                </Button>
+              )}
+            </div>
+          </CardHeader>
+          <CardContent>
+            {history.length === 0 ? (
+              <p className="text-gray-400 text-center py-8">暂无分析历史</p>
+            ) : (
+              <div className="space-y-3 max-h-96 overflow-y-auto">
+                {history.map((record) => (
+                  <div
+                    key={record.id}
+                    className="bg-gray-700/30 rounded-lg p-4 hover:bg-gray-700/50 transition-colors"
+                  >
+                    <div className="flex items-start justify-between mb-2">
+                      <div className="flex-1">
+                        <div className="flex items-center space-x-3 mb-1">
+                          <span className="font-semibold text-white">{record.symbol}</span>
+                          <span className="text-sm text-gray-400">{record.stockName}</span>
+                          <span className="text-sm text-gray-400">${record.currentPrice.toFixed(2)}</span>
+                          <span className={`text-xs px-2 py-1 rounded ${
+                            record.analysis.recommendation === 'strong_buy' ? 'bg-green-600/20 text-green-400' :
+                            record.analysis.recommendation === 'buy' ? 'bg-green-600/10 text-green-300' :
+                            record.analysis.recommendation === 'hold' ? 'bg-amber-600/20 text-amber-400' :
+                            record.analysis.recommendation === 'sell' ? 'bg-red-600/10 text-red-300' :
+                            'bg-red-600/20 text-red-400'
+                          }`}>
+                            {getRecommendationText(record.analysis.recommendation)}
+                          </span>
+                        </div>
+                        <p className="text-xs text-gray-500">
+                          {new Date(record.timestamp).toLocaleString('zh-CN')}
+                          {record.aiProvider && ` • ${record.aiProvider}`}
+                        </p>
+                      </div>
+                      <div className="flex items-center space-x-2">
+                        <Button
+                          variant="ghost"
+                          size="sm"
+                          onClick={() => {
+                            setSymbol(record.symbol)
+                            setAnalysis(record.analysis)
+                            setShowHistory(false)
+                          }}
+                          className="text-blue-400 hover:text-blue-300 hover:bg-blue-600/10"
+                        >
+                          查看详情
+                        </Button>
+                        <Button
+                          variant="ghost"
+                          size="icon"
+                          onClick={() => deleteHistoryItem(record.id)}
+                          className="text-red-400 hover:text-red-300 hover:bg-red-600/10"
+                        >
+                          <Trash2 className="h-4 w-4" />
+                        </Button>
+                      </div>
+                    </div>
+                    <div className="flex items-center space-x-4 text-xs text-gray-400">
+                      <span>基本面: {record.analysis.fundamental.score}</span>
+                      <span>技术面: {record.analysis.technical.score}</span>
+                      <span>情绪: {record.analysis.sentiment.score}</span>
+                      <span>置信度: {record.analysis.confidence}%</span>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
+          </CardContent>
+        </Card>
+      )}
+
       {/* 错误提示 */}
       {errorMessage && (
         <Card className="bg-red-600/10 border-red-600/30">
@@ -277,23 +761,31 @@ export default function AnalysisPage() {
               className="flex-1 px-4 py-3 bg-gray-700/50 border border-gray-600/50 rounded-lg text-white text-lg focus:border-blue-500 focus:outline-none"
               placeholder="输入股票代码，如 AAPL"
             />
-            <Button
-              onClick={runAnalysis}
-              disabled={isLoading}
-              className="bg-gradient-to-r from-blue-600 to-purple-600 hover:from-blue-700 hover:to-purple-700 text-white px-8 py-3 text-lg"
-            >
-              {isLoading ? (
-                <>
-                  <div className="animate-spin rounded-full h-5 w-5 border-b-2 border-white mr-2"></div>
-                  分析中...
-                </>
-              ) : (
-                <>
-                  <Zap className="h-5 w-5 mr-2" />
-                  开始分析
-                </>
+            <div className="flex items-center space-x-2">
+              {isLoadingStock && (
+                <div className="animate-spin rounded-full h-5 w-5 border-b-2 border-blue-400"></div>
               )}
-            </Button>
+              {!isLoadingStock && stockName && (
+                <span className="text-sm text-gray-400 mr-2">{stockName} - ${currentPrice.toFixed(2)}</span>
+              )}
+              <Button
+                onClick={runAnalysis}
+                disabled={isLoading || isLoadingStock}
+                className="bg-gradient-to-r from-blue-600 to-purple-600 hover:from-blue-700 hover:to-purple-700 text-white px-8 py-3 text-lg"
+              >
+                {isLoading ? (
+                  <>
+                    <div className="animate-spin rounded-full h-5 w-5 border-b-2 border-white mr-2"></div>
+                    分析中...
+                  </>
+                ) : (
+                  <>
+                    <Zap className="h-5 w-5 mr-2" />
+                    开始分析
+                  </>
+                )}
+              </Button>
+            </div>
           </div>
         </CardContent>
       </Card>
@@ -531,6 +1023,36 @@ export default function AnalysisPage() {
             </CardContent>
           </Card>
         </>
+      )}
+
+      {/* 自定义确认对话框 */}
+      {confirmDialog.show && (
+        <ConfirmDialog
+          title={confirmDialog.title}
+          message={confirmDialog.message}
+          confirmText="使用模拟数据"
+          cancelText="取消"
+          type="warning"
+          onConfirm={() => {
+            confirmDialog.onConfirm()
+            setConfirmDialog({ ...confirmDialog, show: false })
+          }}
+          onCancel={() => setConfirmDialog({ ...confirmDialog, show: false })}
+        />
+      )}
+
+      {/* Toast 通知 */}
+      {toast.show && (
+        <div className={`fixed bottom-6 right-6 z-50 animate-in slide-in-from-bottom-2 duration-300 ${
+          toast.type === 'success' ? 'bg-green-600' :
+          toast.type === 'error' ? 'bg-red-600' :
+          'bg-blue-600'
+        } text-white px-6 py-3 rounded-lg shadow-lg flex items-center space-x-3`}>
+          {toast.type === 'success' && <CheckCircle className="h-5 w-5" />}
+          {toast.type === 'error' && <AlertCircle className="h-5 w-5" />}
+          {toast.type === 'info' && <Info className="h-5 w-5" />}
+          <span>{toast.message}</span>
+        </div>
       )}
     </div>
   )

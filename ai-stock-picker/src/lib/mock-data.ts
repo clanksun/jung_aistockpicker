@@ -90,23 +90,20 @@ function calculateIndicators(history: StockHistoryData[]): void {
   for (let i = 0; i < history.length; i++) {
     // MA5
     if (i >= 4) {
-      history[i].ma5 = Number(history.slice(i - 4, i + 1)
-        .reduce((acc, h) => acc + h.close, 0) / 5
-        .toFixed(2))
+      const sum5 = history.slice(i - 4, i + 1).reduce((sum, item) => sum + (item.close || 0), 0)
+      history[i].ma5 = Number((sum5 / 5).toFixed(2))
     }
 
     // MA10
     if (i >= 9) {
-      history[i].ma10 = Number(history.slice(i - 9, i + 1)
-        .reduce((acc, h) => acc + h.close, 0) / 10
-        .toFixed(2))
+      const sum10 = history.slice(i - 9, i + 1).reduce((sum, item) => sum + (item.close || 0), 0)
+      history[i].ma10 = Number((sum10 / 10).toFixed(2))
     }
 
     // MA20
     if (i >= 19) {
-      history[i].ma20 = Number(history.slice(i - 19, i + 1)
-        .reduce((acc, h) => acc + h.close, 0) / 20
-        .toFixed(2))
+      const sum20 = history.slice(i - 19, i + 1).reduce((sum, item) => sum + (item.close || 0), 0)
+      history[i].ma20 = Number((sum20 / 20).toFixed(2))
     }
 
     // RSI
