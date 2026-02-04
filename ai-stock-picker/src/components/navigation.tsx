@@ -2,7 +2,7 @@
 
 import { usePathname } from "next/navigation"
 import Link from "next/link"
-import { Home, Brain, BarChart3, Heart } from "lucide-react"
+import { Home, Brain, BarChart3, Heart, Settings } from "lucide-react"
 
 const navItems = [
   {
@@ -24,6 +24,11 @@ const navItems = [
     href: "/favorites",
     label: "收藏管理",
     icon: Heart,
+  },
+  {
+    href: "/settings",
+    label: "设置",
+    icon: Settings,
   },
 ]
 

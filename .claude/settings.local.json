@@ -20,7 +20,9 @@
       "Bash(timeout 5 python:*)",
       "Bash(python -m py_compile:*)",
       "Bash(du:*)",
-      "Bash(wc:*)"
+      "Bash(wc:*)",
+      "Bash(ls:*)",
+      "Bash(git -C /Users/zhengsun/PycharmProjects/Backtrader/ai-stock-picker status:*)"
     ]
   }
 }

@@ -1,81 +1,169 @@
 "use client"
 
-import { useState } from "react"
-import { Brain, TrendingUp, TrendingDown, AlertCircle, CheckCircle, Zap } from "lucide-react"
+import { useState, useEffect } from "react"
+import { useRouter } from "next/navigation"
+import { Brain, TrendingUp, TrendingDown, AlertCircle, CheckCircle, Zap, Settings, Info } from "lucide-react"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Button } from "@/components/ui/button"
-
-interface AnalysisData {
-  symbol: string
-  fundamental: {
-    overall: 'bullish' | 'bearish' | 'neutral'
-    score: number
-    factors: {
-      name: string
-      status: 'positive' | 'negative' | 'neutral'
-      description: string
-    }[]
-  }
-  technical: {
-    overall: 'bullish' | 'bearish' | 'neutral'
-    score: number
-    indicators: {
-      name: string
-      value: number
-      signal: 'buy' | 'sell' | 'neutral'
-    }[]
-  }
-  sentiment: {
-    overall: 'bullish' | 'bearish' | 'neutral'
-    score: number
-    sources: {
-      name: string
-      sentiment: 'positive' | 'negative' | 'neutral'
-      confidence: number
-    }[]
-  }
-  recommendation: 'strong_buy' | 'buy' | 'hold' | 'sell' | 'strong_sell'
-  confidence: number
-  reasoning: string[]
-}
+import { callAI, getStockAnalysisPrompt } from "@/lib/ai-client"
+import type { UserAIConfig } from "@/types/ai"
+import type { AnalysisData } from "@/types/stock"
 
 export default function AnalysisPage() {
+  const router = useRouter()
   const [symbol, setSymbol] = useState('AAPL')
+  const [stockName, setStockName] = useState('Apple Inc.')
+  const [currentPrice, setCurrentPrice] = useState(185.92)
   const [isLoading, setIsLoading] = useState(false)
   const [analysis, setAnalysis] = useState<AnalysisData | null>(null)
+  const [aiConfigs, setAiConfigs] = useState<UserAIConfig[]>([])
+  const [useMock, setUseMock] = useState(false)
+  const [errorMessage, setErrorMessage] = useState('')
+
+  useEffect(() => {
+    loadAIConfigs()
+  }, [])
+
+  const loadAIConfigs = () => {
+    const stored = localStorage.getItem('ai_configs')
+    if (stored) {
+      const configs = JSON.parse(stored)
+      setAiConfigs(configs)
+      // 检查是否有启用的配置
+      const hasEnabledConfig = configs.some((c: UserAIConfig) => c.enabled && c.apiKey)
+      if (!hasEnabledConfig) {
+        setUseMock(true)
+      }
+    } else {
+      setUseMock(true)
+    }
+  }
 
   const runAnalysis = async () => {
     setIsLoading(true)
+    setErrorMessage('')
 
-    // 模拟 AI 分析
-    await new Promise(resolve => setTimeout(resolve, 2500))
+    try {
+      let result: AnalysisData
 
-    const mockAnalysis: AnalysisData = {
+      if (useMock) {
+        // 使用模拟数据
+        await new Promise(resolve => setTimeout(resolve, 2000))
+        result = generateMockAnalysis()
+      } else {
+        // 使用真实 AI API
+        const enabledConfigs = aiConfigs.filter(c => c.enabled && c.apiKey)
+
+        if (enabledConfigs.length === 0) {
+          throw new Error('没有可用的 AI 配置，请先在设置页面配置 AI')
+        }
+
+        // 尝试使用第一个可用的配置
+        const config = enabledConfigs[0]
+
+        const prompt = getStockAnalysisPrompt({
+          symbol,
+          stockName,
+          currentPrice,
+          includeFundamental: true,
+          includeTechnical: true,
+          includeSentiment: true
+        })
+
+        const response = await callAI(
+          config.provider,
+          config.apiKey,
+          config.model,
+          [
+            {
+              role: 'system',
+              content: '你是一位专业的股票分析师。请严格按照用户要求的JSON格式返回分析结果。'
+            },
+            {
+              role: 'user',
+              content: prompt + '\n\n请严格按照上面的JSON格式返回，不要包含其他文字。'
+            }
+          ]
+        )
+
+        if (!response.success || !response.content) {
+          throw new Error(response.error || 'AI 分析失败')
+        }
+
+        // 解析 AI 返回的 JSON
+        try {
+          // 提取 JSON（可能有 markdown 代码块）
+          let jsonStr = response.content
+          const codeBlockMatch = jsonStr.match(/```json\n([\s\S]*?)\n```/) ||
+                           jsonStr.match(/```\n([\s\S]*?)\n```/) ||
+                           jsonStr.match(/({[\s\S]*})/)
+
+          if (codeBlockMatch) {
+            jsonStr = codeBlockMatch[1] || codeBlockMatch[0]
+          }
+
+          result = JSON.parse(jsonStr)
+          result.symbol = symbol
+        } catch (parseError) {
+          console.error('JSON parse error:', parseError)
+          console.log('AI Response:', response.content)
+          throw new Error('AI 返回的数据格式错误，请重试或使用模拟数据')
+        }
+      }
+
+      setAnalysis(result)
+    } catch (error) {
+      const errorMsg = error instanceof Error ? error.message : '分析失败'
+      setErrorMessage(errorMsg)
+
+      // 如果是 AI 调用失败，询问是否降级到模拟数据
+      if (!useMock && errorMsg.includes('API')) {
+        if (confirm('AI 调用失败：' + errorMsg + '\n\n是否使用模拟数据继续？')) {
+          setUseMock(true)
+          const mockResult = generateMockAnalysis()
+          setAnalysis(mockResult)
+          setErrorMessage('')
+        }
+      }
+    } finally {
+      setIsLoading(false)
+    }
+  }
+
+  const getRecommendationColor = (rec: string) => {
+    switch (rec) {
+      case 'strong_buy': return 'text-green-400'
+      case 'buy': return 'text-green-300'
+      case 'hold': return 'text-amber-400'
+      case 'sell': return 'text-red-300'
+      case 'strong_sell': return 'text-red-400'
+      default: return 'text-gray-400'
+    }
+  }
+
+  const getRecommendationText = (rec: string) => {
+    switch (rec) {
+      case 'strong_buy': return '强烈买入'
+      case 'buy': return '买入'
+      case 'hold': return '持有'
+      case 'sell': return '卖出'
+      case 'strong_sell': return '强烈卖出'
+      default: return '观望'
+    }
+  }
+
+  // 生成模拟分析数据
+  function generateMockAnalysis(): AnalysisData {
+    return {
       symbol: symbol,
       fundamental: {
         overall: 'bullish',
         score: 75,
         factors: [
-          {
-            name: '盈利能力',
-            status: 'positive',
-            description: 'ROE 45.2%，远高于行业平均'
-          },
-          {
-            name: '估值水平',
-            status: 'neutral',
-            description: 'PE 28.5，略高于行业中位数'
-          },
-          {
-            name: '成长性',
-            status: 'positive',
-            description: '营收同比增长 8.5%，保持稳定'
-          },
-          {
-            name: '财务健康',
-            status: 'positive',
-            description: '现金储备充裕，负债率低'
-          }
+          { name: '盈利能力', status: 'positive', description: 'ROE 45.2%，远高于行业平均' },
+          { name: '估值水平', status: 'neutral', description: 'PE 28.5，略高于行业中位数' },
+          { name: '成长性', status: 'positive', description: '营收同比增长 8.5%，保持稳定' },
+          { name: '财务健康', status: 'positive', description: '现金储备充裕，负债率低' }
         ]
       },
       technical: {
@@ -108,31 +196,6 @@ export default function AnalysisPage() {
         '适合中长期持有'
       ]
     }
-
-    setAnalysis(mockAnalysis)
-    setIsLoading(false)
-  }
-
-  const getRecommendationColor = (rec: string) => {
-    switch (rec) {
-      case 'strong_buy': return 'text-green-400'
-      case 'buy': return 'text-green-300'
-      case 'hold': return 'text-amber-400'
-      case 'sell': return 'text-red-300'
-      case 'strong_sell': return 'text-red-400'
-      default: return 'text-gray-400'
-    }
-  }
-
-  const getRecommendationText = (rec: string) => {
-    switch (rec) {
-      case 'strong_buy': return '强烈买入'
-      case 'buy': return '买入'
-      case 'hold': return '持有'
-      case 'sell': return '卖出'
-      case 'strong_sell': return '强烈卖出'
-      default: return '观望'
-    }
   }
 
   return (
@@ -147,6 +210,61 @@ export default function AnalysisPage() {
           <p className="text-gray-400">基于多维度数据的智能投资建议</p>
         </div>
       </div>
+
+      {/* AI 配置提示 */}
+      <Card className="bg-blue-600/10 border-blue-600/30">
+        <CardContent className="p-4">
+          <div className="flex items-center justify-between">
+            <div className="flex items-center space-x-3">
+              <Info className="h-5 w-5 text-blue-400" />
+              <div className="text-sm text-gray-300">
+                {aiConfigs.filter(c => c.enabled && c.apiKey).length > 0 ? (
+                  <span>已配置 {aiConfigs.filter(c => c.enabled && c.apiKey).length} 个 AI 提供商</span>
+                ) : (
+                  <span>未配置 AI API，将使用模拟数据</span>
+                )}
+              </div>
+            </div>
+            <div className="flex items-center space-x-4">
+              <label className="flex items-center space-x-2 text-sm text-gray-300">
+                <input
+                  type="checkbox"
+                  checked={useMock}
+                  onChange={(e) => setUseMock(e.target.checked)}
+                  className="w-4 h-4 rounded"
+                />
+                <span>使用模拟数据</span>
+              </label>
+              {!useMock && aiConfigs.filter(c => c.enabled && c.apiKey).length === 0 && (
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={() => router.push('/settings')}
+                  className="border-blue-600/50 text-blue-400 hover:bg-blue-600/10"
+                >
+                  <Settings className="h-4 w-4 mr-2" />
+                  去配置
+                </Button>
+              )}
+            </div>
+          </div>
+        </CardContent>
+      </Card>
+
+      {/* 错误提示 */}
+      {errorMessage && (
+        <Card className="bg-red-600/10 border-red-600/30">
+          <CardContent className="p-4">
+            <div className="flex items-start space-x-3">
+              <AlertCircle className="h-5 w-5 text-red-400 mt-0.5" />
+              <div className="flex-1">
+                <h4 className="text-white font-semibold mb-1">分析失败</h4>
+                <p className="text-sm text-gray-300">{errorMessage}</p>
+              </div>
+            </div>
+          </CardContent>
+        </Card>
+      )}
 
       {/* 股票输入 */}
       <Card className="bg-gray-800/50 border-gray-700/50">
